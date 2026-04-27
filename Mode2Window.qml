@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Dialogs
 
 Window {
     id: mode2Window
@@ -38,8 +39,12 @@ Window {
                     verticalAlignment: Text.AlignVCenter
                 }
                 onClicked: {
-                    wordsModel.clearSession()
-                    mode2Window.hide()
+                    if (wordsModel.wrongWordCount > 0) {
+                        exportDialog.open()
+                    } else {
+                        wordsModel.clearSession()
+                        mode2Window.hide()
+                    }
                 }
             }
 
@@ -91,7 +96,7 @@ Window {
 
             Rectangle {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 50
+                Layout.preferredHeight: 60
                 color: "white"
                 radius: 8
                 border.color: answerField.activeFocus ? "#2196F3" : "#ccc"
@@ -104,7 +109,13 @@ Window {
                     font.pixelSize: 20
                     verticalAlignment: Text.AlignVCenter
                     placeholderTextColor: "#bbb"
-                    onAccepted: submitBtn.clicked()
+                    onAccepted: {
+                        if (wordsModel.answerShown) {
+                            continueBtn.clicked()
+                        } else {
+                            submitBtn.clicked()
+                        }
+                    }
                 }
             }
 
@@ -160,6 +171,8 @@ Window {
             }
 
             Item { Layout.fillHeight: true }
+
+
         }
 
         ColumnLayout {
@@ -179,8 +192,12 @@ Window {
                 text: qsTr("返回")
                 Layout.alignment: Qt.AlignHCenter
                 onClicked: {
-                    wordsModel.clearSession()
-                    mode2Window.hide()
+                    if (wordsModel.wrongWordCount > 0) {
+                        exportDialog.open()
+                    } else {
+                        wordsModel.clearSession()
+                        mode2Window.hide()
+                    }
                 }
             }
 
@@ -217,8 +234,12 @@ Window {
                 palette.button: "#2196F3"
                 Layout.alignment: Qt.AlignHCenter
                 onClicked: {
-                    wordsModel.clearSession()
-                    mode2Window.hide()
+                    if (wordsModel.wrongWordCount > 0) {
+                        exportDialog.open()
+                    } else {
+                        wordsModel.clearSession()
+                        mode2Window.hide()
+                    }
                 }
             }
 
@@ -245,6 +266,45 @@ Window {
             answerField.text = ""
             if (wordsModel.hasCurrentWord)
                 answerField.forceActiveFocus()
+        }
+    }
+
+    Dialog {
+        id: exportDialog
+        title: qsTr("导出错词")
+        modal: true
+        standardButtons: Dialog.Yes | Dialog.No
+        anchors.centerIn: parent
+
+        Label {
+            text: qsTr("本次学习中有 %1 个错词，是否导出？").arg(wordsModel.wrongWordCount)
+            font.pixelSize: 14
+        }
+
+        onAccepted: saveFileDialog.open()
+        onRejected: {
+            wordsModel.clearSession()
+            mode2Window.hide()
+        }
+    }
+
+    FileDialog {
+        id: saveFileDialog
+        title: qsTr("保存错词文件")
+        acceptLabel: qsTr("保存")
+        rejectLabel: qsTr("取消")
+        fileMode: FileDialog.SaveFile
+        defaultSuffix: "csv"
+        nameFilters: ["CSV files (*.csv)"]
+
+        onAccepted: {
+            wordsModel.exportWrongWords(selectedFile)
+            wordsModel.clearSession()
+            mode2Window.hide()
+        }
+        onRejected: {
+            wordsModel.clearSession()
+            mode2Window.hide()
         }
     }
 }

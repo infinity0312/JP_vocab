@@ -8,6 +8,8 @@
 #include <QDir>
 #include <algorithm>
 #include <random>
+#include <QSet>
+#include <QPair>
 
 WordsModel::WordsModel(QObject *parent) : QAbstractListModel(parent) { loadData(); }
 
@@ -124,6 +126,23 @@ int WordsModel::memorizedCount() const
 bool WordsModel::meaningRevealed() const { return m_meaningRevealed; }
 bool WordsModel::answerShown() const { return m_answerShown; }
 
+bool WordsModel::canGoBack() const { return !m_actionHistory.isEmpty(); }
+
+int WordsModel::wrongWordCount() const
+{
+    QSet<int> seen;
+    int count = 0;
+    for (int idx : m_reviewQueue) {
+        if (m_allWords[idx].sessionAttempts() > 0
+            && !m_allWords[idx].sessionCompleted()
+            && !seen.contains(idx)) {
+            seen.insert(idx);
+            count++;
+        }
+    }
+    return count;
+}
+
 void WordsModel::importCSV(const QUrl &fileUrl, const QString &delimiter)
 {
     QString filePath = fileUrl.toLocalFile();
@@ -198,6 +217,8 @@ void WordsModel::startSession(int mode)
     m_currentQueueIndex = -1;
     m_meaningRevealed = false;
     m_answerShown = false;
+    m_actionHistory.clear();
+    emit canGoBackChanged();
 
     for (auto &w : m_allWords) {
         w.resetSessionAttempts();
@@ -205,8 +226,10 @@ void WordsModel::startSession(int mode)
 
     buildReviewQueue();
 
-    if (m_reviewQueue.isEmpty())
+    if (m_reviewQueue.isEmpty()) {
+        emit wrongWordCountChanged();
         return;
+    }
 
     m_currentQueueIndex = 0;
     emit currentWordChanged();
@@ -215,6 +238,7 @@ void WordsModel::startSession(int mode)
     emitProgressChanged();
     emit meaningRevealedChanged();
     emit answerShownChanged();
+    emit wrongWordCountChanged();
 }
 
 void WordsModel::markKnown()
@@ -223,6 +247,17 @@ void WordsModel::markKnown()
         return;
 
     int idx = m_reviewQueue[m_currentQueueIndex];
+
+    UndoRecord rec;
+    rec.wordIndex = idx;
+    rec.queueIndex = m_currentQueueIndex;
+    rec.wasKnown = true;
+    rec.prevSessionAttempts = m_allWords[idx].sessionAttempts();
+    rec.prevRepetition = m_allWords[idx].repetition();
+    rec.prevEasinessFactor = m_allWords[idx].easinessFactor();
+    rec.prevInterval = m_allWords[idx].interval();
+    m_actionHistory.push(rec);
+
     int attempts = m_allWords[idx].sessionAttempts();
     int quality = calculateQuality(attempts);
 
@@ -239,6 +274,8 @@ void WordsModel::markKnown()
 
     saveData();
     emitProgressChanged();
+    emit canGoBackChanged();
+    emit wrongWordCountChanged();
     advanceToNext();
 }
 
@@ -248,12 +285,25 @@ void WordsModel::markUnknown()
         return;
 
     int idx = m_reviewQueue[m_currentQueueIndex];
+
+    UndoRecord rec;
+    rec.wordIndex = idx;
+    rec.queueIndex = m_currentQueueIndex;
+    rec.wasKnown = false;
+    rec.prevSessionAttempts = m_allWords[idx].sessionAttempts();
+    rec.prevRepetition = m_allWords[idx].repetition();
+    rec.prevEasinessFactor = m_allWords[idx].easinessFactor();
+    rec.prevInterval = m_allWords[idx].interval();
+    m_actionHistory.push(rec);
+
     m_allWords[idx].incrementSessionAttempts();
 
     m_reviewQueue.append(idx);
     m_meaningRevealed = true;
     emit meaningRevealedChanged();
 
+    emit canGoBackChanged();
+    emit wrongWordCountChanged();
     advanceToNext();
 }
 
@@ -263,14 +313,29 @@ bool WordsModel::checkAnswer(const QString &answer)
         return false;
 
     int idx = m_reviewQueue[m_currentQueueIndex];
+
+    UndoRecord rec;
+    rec.wordIndex = idx;
+    rec.queueIndex = m_currentQueueIndex;
+    rec.prevSessionAttempts = m_allWords[idx].sessionAttempts();
+    rec.prevRepetition = m_allWords[idx].repetition();
+    rec.prevEasinessFactor = m_allWords[idx].easinessFactor();
+    rec.prevInterval = m_allWords[idx].interval();
+
     QString correct = m_allWords[idx].word().trimmed();
     QString input = answer.trimmed();
 
     correct.replace(QRegularExpression("\\([^)]*\\)"), "");
     correct.replace(QRegularExpression("\\[[^)]*\\]"), "");
     correct.replace("～", "");
+    correct.replace("・", "");
+    correct.replace("……", "");
 
     if (input.compare(correct, Qt::CaseInsensitive) == 0) {
+        rec.wasKnown = true;
+        m_actionHistory.push(rec);
+        emit canGoBackChanged();
+
         int attempts = m_allWords[idx].sessionAttempts();
         int quality = calculateQuality(attempts);
         m_allWords[idx].updateSM2(quality);
@@ -283,13 +348,19 @@ bool WordsModel::checkAnswer(const QString &answer)
 
         saveData();
         emitProgressChanged();
+        emit wrongWordCountChanged();
         return true;
     }
+
+    rec.wasKnown = false;
+    m_actionHistory.push(rec);
+    emit canGoBackChanged();
 
     m_allWords[idx].incrementSessionAttempts();
     m_reviewQueue.append(idx);
     m_answerShown = true;
     emit answerShownChanged();
+    emit wrongWordCountChanged();
     return false;
 }
 
@@ -304,6 +375,80 @@ void WordsModel::revealMeaning()
     emit meaningRevealedChanged();
 }
 
+void WordsModel::goBack()
+{
+    if (m_actionHistory.isEmpty())
+        return;
+
+    UndoRecord rec = m_actionHistory.pop();
+    int idx = rec.wordIndex;
+    Word &w = m_allWords[idx];
+
+    if (rec.wasKnown) {
+        w.setRepetition(rec.prevRepetition);
+        w.setEasinessFactor(rec.prevEasinessFactor);
+        w.setInterval(rec.prevInterval);
+        w.setSessionAttempts(rec.prevSessionAttempts);
+        w.setSessionCompleted(false);
+        if (m_currentMode == 1) {
+            w.setMode1Completed(false);
+            emit mode1DueCountChanged();
+        } else if (m_currentMode == 2) {
+            w.setMode2Completed(false);
+            emit mode2DueCountChanged();
+        }
+        m_completedCount--;
+    } else {
+        w.setSessionAttempts(rec.prevSessionAttempts);
+        if (!m_reviewQueue.isEmpty() && m_reviewQueue.last() == idx)
+            m_reviewQueue.removeLast();
+    }
+
+    m_currentQueueIndex = rec.queueIndex;
+    m_meaningRevealed = false;
+    m_answerShown = false;
+
+    saveData();
+    emit currentWordChanged();
+    emit currentMeaningChanged();
+    emit hasCurrentWordChanged();
+    emit meaningRevealedChanged();
+    emit answerShownChanged();
+    emit canGoBackChanged();
+    emit wrongWordCountChanged();
+    emitProgressChanged();
+}
+
+void WordsModel::exportWrongWords(const QUrl &fileUrl)
+{
+    QSet<int> seen;
+    QList<QPair<QString, QString>> wrongWords;
+    for (int idx : m_reviewQueue) {
+        if (m_allWords[idx].sessionAttempts() > 0
+            && !m_allWords[idx].sessionCompleted()
+            && !seen.contains(idx)) {
+            seen.insert(idx);
+            wrongWords.append({m_allWords[idx].word(), m_allWords[idx].meaning()});
+        }
+    }
+
+    if (wrongWords.isEmpty())
+        return;
+
+    QString filePath = fileUrl.toLocalFile();
+    QFile file(filePath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text))
+        return;
+
+    QTextStream out(&file);
+    out.setEncoding(QStringConverter::Utf8);
+    out.setGenerateByteOrderMark(true);
+    for (const auto &pair : wrongWords) {
+        out << pair.first << "," << pair.second << "\n";
+    }
+    file.close();
+}
+
 void WordsModel::clearSession()
 {
     m_reviewQueue.clear();
@@ -312,6 +457,7 @@ void WordsModel::clearSession()
     m_currentMode = 0;
     m_meaningRevealed = false;
     m_answerShown = false;
+    m_actionHistory.clear();
 
     for (auto &w : m_allWords) {
         w.resetSessionAttempts();
@@ -323,6 +469,8 @@ void WordsModel::clearSession()
     emit hasCurrentWordChanged();
     emit meaningRevealedChanged();
     emit answerShownChanged();
+    emit canGoBackChanged();
+    emit wrongWordCountChanged();
     emitProgressChanged();
 }
 

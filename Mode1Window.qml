@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Dialogs
 
 Window {
     id: mode1Window
@@ -34,9 +35,27 @@ Window {
                     verticalAlignment: Text.AlignVCenter
                 }
                 onClicked: {
-                    wordsModel.clearSession()
-                    mode1Window.hide()
+                    if (wordsModel.wrongWordCount > 0) {
+                        exportDialog.open()
+                    } else {
+                        wordsModel.clearSession()
+                        mode1Window.hide()
+                    }
                 }
+            }
+
+            Button {
+                text: qsTr("撤销")
+                flat: true
+                enabled: wordsModel.canGoBack
+                contentItem: Text {
+                    text: parent.text
+                    color: wordsModel.canGoBack ? "white" : "rgba(255,255,255,0.4)"
+                    font.pixelSize: 14
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+                onClicked: wordsModel.goBack()
             }
 
             Item { Layout.fillWidth: true }
@@ -166,8 +185,12 @@ Window {
                 text: qsTr("返回")
                 Layout.alignment: Qt.AlignHCenter
                 onClicked: {
-                    wordsModel.clearSession()
-                    mode1Window.hide()
+                    if (wordsModel.wrongWordCount > 0) {
+                        exportDialog.open()
+                    } else {
+                        wordsModel.clearSession()
+                        mode1Window.hide()
+                    }
                 }
             }
 
@@ -203,12 +226,55 @@ Window {
                 highlighted: true
                 Layout.alignment: Qt.AlignHCenter
                 onClicked: {
-                    wordsModel.clearSession()
-                    mode1Window.hide()
+                    if (wordsModel.wrongWordCount > 0) {
+                        exportDialog.open()
+                    } else {
+                        wordsModel.clearSession()
+                        mode1Window.hide()
+                    }
                 }
             }
 
             Item { Layout.fillHeight: true }
+        }
+    }
+
+    Dialog {
+        id: exportDialog
+        title: qsTr("导出错词")
+        modal: true
+        standardButtons: Dialog.Yes | Dialog.No
+        anchors.centerIn: parent
+
+        Label {
+            text: qsTr("本次学习中有 %1 个错词，是否导出？").arg(wordsModel.wrongWordCount)
+            font.pixelSize: 14
+        }
+
+        onAccepted: saveFileDialog.open()
+        onRejected: {
+            wordsModel.clearSession()
+            mode1Window.hide()
+        }
+    }
+
+    FileDialog {
+        id: saveFileDialog
+        title: qsTr("保存错词文件")
+        acceptLabel: qsTr("保存")
+        rejectLabel: qsTr("取消")
+        fileMode: FileDialog.SaveFile
+        defaultSuffix: "csv"
+        nameFilters: ["CSV files (*.csv)"]
+
+        onAccepted: {
+            wordsModel.exportWrongWords(selectedFile)
+            wordsModel.clearSession()
+            mode1Window.hide()
+        }
+        onRejected: {
+            wordsModel.clearSession()
+            mode1Window.hide()
         }
     }
 }

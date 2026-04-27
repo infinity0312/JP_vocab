@@ -126,6 +126,20 @@ Window {
         clip: true
         spacing: 8
 
+        ScrollBar.vertical: ScrollBar {
+            policy: ScrollBar.AlwaysOn
+            width: 8
+            contentItem: Rectangle {
+                radius: 4
+                color: "#c0c0c0"
+                opacity: parent.pressed ? 0.8 : (parent.hovered ? 0.6 : 0.35)
+                Behavior on opacity { NumberAnimation { duration: 150 } }
+            }
+            background: Rectangle {
+                color: "transparent"
+            }
+        }
+
         model: filteredModel
         delegate: Rectangle {
             width: wordList.width
@@ -220,6 +234,8 @@ Window {
         title: qsTr("确认操作")
         modal: true
         standardButtons: Dialog.Ok | Dialog.Cancel
+        width: 320
+        anchors.centerIn: parent
 
         property string actionType: ""
         property string message: ""
@@ -325,7 +341,7 @@ Window {
                 var meaning = wordsModel.data(idx, 258)
                 var matchSearch = searchText === "" || word.toLowerCase().includes(searchText.toLowerCase()) || meaning.toLowerCase().includes(searchText.toLowerCase())
 
-                if (!matchSearch) return
+                if (!matchSearch) continue
 
                 if (filterMode === 0) {
                     filteredModel.append({

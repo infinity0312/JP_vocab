@@ -3,6 +3,7 @@
 
 #include <QAbstractListModel>
 #include <QList>
+#include <QStack>
 #include "words.h"
 
 class WordsModel : public QAbstractListModel
@@ -20,6 +21,8 @@ class WordsModel : public QAbstractListModel
     Q_PROPERTY(bool meaningRevealed READ meaningRevealed NOTIFY meaningRevealedChanged)
     Q_PROPERTY(bool answerShown READ answerShown NOTIFY answerShownChanged)
     Q_PROPERTY(int memorizedCount READ memorizedCount NOTIFY memorizedCountChanged)
+    Q_PROPERTY(bool canGoBack READ canGoBack NOTIFY canGoBackChanged)
+    Q_PROPERTY(int wrongWordCount READ wrongWordCount NOTIFY wrongWordCountChanged)
 
 public:
     enum Roles
@@ -52,6 +55,8 @@ public:
     int totalWords() const;
     bool meaningRevealed() const;
     bool answerShown() const;
+    bool canGoBack() const;
+    int wrongWordCount() const;
     int memorizedCount() const;
 
     Q_INVOKABLE void importCSV(const QUrl &fileUrl, const QString &delimiter);
@@ -70,6 +75,8 @@ public:
     Q_INVOKABLE void resetWordProgress(int index);
     Q_INVOKABLE void resetWordsProgress(const QList<int> &indices);
     Q_INVOKABLE void addWord(const QString &word, const QString &meaning);
+    Q_INVOKABLE void goBack();
+    Q_INVOKABLE void exportWrongWords(const QUrl &fileUrl);
 
 signals:
     void currentWordChanged();
@@ -85,12 +92,24 @@ signals:
     void answerShownChanged();
     void sessionCompleted();
     void memorizedCountChanged();
+    void canGoBackChanged();
+    void wrongWordCountChanged();
     void importCompleted(int count);
     void importFailed(const QString &error);
 
 private:
     QList<Word> m_allWords;
     QList<int> m_reviewQueue;
+    struct UndoRecord {
+        int wordIndex = -1;
+        int queueIndex = -1;
+        bool wasKnown = false;
+        int prevSessionAttempts = 0;
+        int prevRepetition = 0;
+        double prevEasinessFactor = 2.5;
+        int prevInterval = 0;
+    };
+    QStack<UndoRecord> m_actionHistory;
     int m_currentQueueIndex = -1;
     int m_completedCount = 0;
     int m_currentMode = 0;
